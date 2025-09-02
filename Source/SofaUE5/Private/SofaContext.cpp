@@ -241,7 +241,10 @@ void ASofaContext::createSofaContext()
 void ASofaContext::loadSofaScene()
 {
     FString curPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-
+    UE_LOG(SUnreal_log, Log, TEXT("## ASofaContext::createSofaContext: curPath: %s"), *curPath);
+    UE_LOG(SUnreal_log, Log, TEXT("## ASofaContext::createSofaContext: filePath.FilePath: %s"), *filePath.FilePath);
+    FString sFilename = curPath + "Plugins/SofaUE5/Content/SofaScenes/liver.scn";
+    filePath.FilePath = sFilename;
     if (filePath.FilePath.IsEmpty()) {
         UE_LOG(SUnreal_log, Warning, TEXT("## ASofaContext: No filePath set."));
         return;
