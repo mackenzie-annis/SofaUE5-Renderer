@@ -237,6 +237,11 @@ void ASofaContext::createSofaContext()
 
     //const char* pathfile = "C:/projects/UnrealEngine/SOFA_test2/Plugins/SofaUE5/Content/SofaScenes/liver.scn";
 
+
+void ASofaContext::loadSofaScene()
+{
+    FString curPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+
     if (filePath.FilePath.IsEmpty()) {
         UE_LOG(SUnreal_log, Warning, TEXT("## ASofaContext: No filePath set."));
         return;
@@ -344,6 +349,144 @@ void ASofaContext::loadDefaultPlugin()
     if (m_isMsgHandlerActivated == true)
         catchSofaMessages();
 }
+
+
+void ASofaContext::loadNodeGraph()
+{
+    if (m_sofaAPI == nullptr)
+        return;
+    
+    int nbrNode = m_sofaAPI->getNbrDAGNode();
+    UE_LOG(SUnreal_log, Warning, TEXT("## ASofaContext::loadNodeGraph: Load Node nbr: %d"), nbrNode);
+
+    UWorld* const World = GetWorld();
+    if (World == nullptr)
+    {
+        UE_LOG(SUnreal_log, Error, TEXT("## ASofaContext::loadNodeGraph: GetWorld return a null pointer"));
+        return;
+    }
+
+    m_dagNodes.clear();
+    // First create all Nodes
+    for (int nodeId = 0; nodeId < nbrNode; nodeId++)
+    {
+        std::string nodeUniqID = m_sofaAPI->getDAGNodeAPIName(nodeId);
+        std::string nodeDisplayName = m_sofaAPI->getDAGNodeDisplayName(nodeId);
+
+        FString fs_nodeUniqID(nodeUniqID.c_str());
+        FString fs_nodeDisplayName(nodeDisplayName.c_str());
+
+        ASofaDAGNode* dagNode = nullptr;
+        if (m_status == -1) // create actors
+        {
+            FActorSpawnParameters SpawnParams;
+            SpawnParams.Name = MakeUniqueObjectName(World, ASofaDAGNode::StaticClass(), FName(*fs_nodeDisplayName));
+            SpawnParams.Owner = this;
+
+            dagNode = World->SpawnActor<ASofaDAGNode>(ASofaDAGNode::StaticClass(), SpawnParams);
+            if (dagNode != nullptr)
+            {                
+                //FAttachmentTransformRules att = FAttachmentTransformRules(EAttachmentRule::KeepRelative, true);
+                dagNode->AttachToActor(this, FAttachmentTransformRules::KeepRelativeTransform);
+
+                std::string parentName = m_sofaAPI->getDAGNodeParentAPIName(nodeUniqID);
+                FString fs_parentName(parentName.c_str());
+                dagNode->setUniqueNameID(fs_nodeUniqID);
+                dagNode->setParentName(fs_parentName);
+                dagNode->SetActorLabel(fs_nodeDisplayName);
+                
+                if (m_log)
+                    UE_LOG(SUnreal_log, Warning, TEXT("### ASofaDAGNode Created: %s | parent: %s | displayName: %s"), *fs_nodeUniqID, *fs_parentName, *fs_nodeDisplayName);
+            }
+            else
+            {
+                UE_LOG(SUnreal_log, Error, TEXT("## ASofaContext::loadNodeGraph: ASofaDAGNode actor not created: %s"), *fs_nodeDisplayName);
+            }
+            m_dagNodes.push_back(dagNode);
+        }
+    }
+
+
+    // Reorder Node using Parent
+    for (unsigned int i = 0; i < m_dagNodes.size(); ++i)
+    {
+        ASofaDAGNode* dagNode = m_dagNodes[i];
+        const FString& parentName = dagNode->getParentName();        
+        //UE_LOG(SUnreal_log, Log, TEXT("## Process: %s | %s"), *dagNode->getUniqNameID(), *parentName);
+
+        auto res = parentName.Compare("None");
+        if (res == 0)
+            continue;
+
+        for (unsigned int j = 0; j < m_dagNodes.size(); ++j)
+        {
+            ASofaDAGNode* otherDagNode = m_dagNodes[j];
+            if (otherDagNode->getUniqNameID().Compare(parentName) == 0)
+            {
+                dagNode->AttachToActor(otherDagNode, FAttachmentTransformRules::KeepRelativeTransform);                
+            }
+        }
+    }
+
+    // Load Components Graph
+    for (unsigned int i = 0; i < m_dagNodes.size(); ++i)
+    {
+        m_dagNodes[i]->loadComponents(this->m_sofaAPI);
+        //loadComponentsInNode(m_dagNodes[i]);
+    }
+
+}
+
+
+void ASofaContext::reconnectNodeGraph()
+{
+    UWorld* const World = GetWorld();
+    if (World == nullptr)
+    {
+        UE_LOG(SUnreal_log, Error, TEXT("## ASofaContext::reconnectNodeGraph: GetWorld return a null pointer"));
+        return;
+    }
+
+    TArray<AActor*> ChildActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ASofaDAGNode::StaticClass(), ChildActors);
+
+    for (auto actor : ChildActors)
+    {
+        UE_LOG(SUnreal_log, Warning, TEXT("### ASofaDAGNode found!!"));
+        ASofaDAGNode* dagNode = dynamic_cast<ASofaDAGNode*>(actor);
+
+        if (dagNode == nullptr)
+        {
+            UE_LOG(SUnreal_log, Warning, TEXT("### ASofaContext::reconnectNodeGraph Child actor found which can't be casted into ASofaDAGNode"), actor->GetFName());
+        }
+        else
+        {
+            m_dagNodes.push_back(dagNode);
+        }
+    }
+
+    // reconnect NodeGraph
+    for (unsigned int i = 0; i < m_dagNodes.size(); ++i)
+    {
+        m_dagNodes[i]->reconnectComponents(this->m_sofaAPI);
+    }
+}
+
+
+void ASofaContext::clearNodeGraph()
+{
+    UE_LOG(SUnreal_log, Warning, TEXT("## ASofaContext::clearNodeGraph: Number of Node nbr: %d"), m_dagNodes.size());
+
+    for (ASofaDAGNode* node : m_dagNodes)
+    {
+        if (node != nullptr)
+        {
+            node->Destroy();
+        }
+    }
+    m_dagNodes.clear();
+}
+
 
 
 void ASofaContext::catchSofaMessages()
