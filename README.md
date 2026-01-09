@@ -10,7 +10,7 @@ This is an **Unreal Engine 5.5 plugin** that renders SOFA physics simulations in
 |-----------|---------|
 | Unreal Engine | **5.5** |
 | SOFA | **23.12** |
-| Platform | Windows (tested) |
+| Platform | Windows |
 | Visual Studio | 2022 with MSVC v14.38 toolset |
 
 ## Installation
@@ -52,7 +52,7 @@ Once loaded, you should see the plugin folders in the Content Browser:
 
 ## Usage
 
-### Quick Start (Auto-Spawn Mode)
+### Quick Start 
 1. **Place a SofaContext** actor in your level (drag from Place Actors panel → All Classes → SofaContext)
 2. **Set the File Path** property to your `.scn` file
 3. **Visual meshes spawn automatically** when the scene loads
@@ -128,22 +128,9 @@ SofaUE5-Renderer/
 - Check `sofa.ini` has correct `SHARE_DIR` path
 - Look at crash log for specific SOFA error messages
 
-## Building SOFA from Source (Recommended)
+## Building SOFA from Source
 
 If pre-built binaries cause crashes, build SOFA yourself:
-
-```bash
-git clone https://github.com/sofa-framework/sofa.git C:/sofa/src
-mkdir C:/sofa/build && cd C:/sofa/build
-
-cmake ../src -G "Visual Studio 17 2022" -A x64 ^
-  -DCMAKE_BUILD_TYPE=Release ^
-  -DAPPLICATION_SOFAPHYSICSAPI=ON ^
-  -DSOFA_BUILD_TESTS=OFF
-
-# Open C:/sofa/build/SOFA.sln in Visual Studio 2022
-# Build in Release mode
-```
 
 Copy DLLs from `C:/sofa/build/bin/Release/` to the plugin folder.
 
