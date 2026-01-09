@@ -19,6 +19,13 @@
 			"Name": "SofaUE5",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+			
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "ProceduralMeshComponent",
+			"Enabled": true
 		}
 	]
 }

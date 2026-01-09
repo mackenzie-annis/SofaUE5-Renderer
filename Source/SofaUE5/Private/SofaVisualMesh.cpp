@@ -23,7 +23,9 @@
  ****************************************************************************/
 #include "SofaVisualMesh.h"
 #include "SofaUE5.h"
+#include "SofaContext.h"
 #include "SofaUE5Library/SofaPhysicsAPI.h"
+#include "Kismet/GameplayStatics.h"
 
 // Sets default values
 ASofaVisualMesh::ASofaVisualMesh()
@@ -45,10 +47,18 @@ void ASofaVisualMesh::setSofaMesh(SofaPhysicsOutputMesh* sofaMesh)
     createMesh();
 }
 
-// Called when the game starts or when spawned
 void ASofaVisualMesh::BeginPlay()
 {
     Super::BeginPlay();
+    UE_LOG(SUnreal_log, Warning, TEXT("[SOFA] SofaVisualMesh::BeginPlay() called for '%s'"), *GetName());
+    
+    // IMPORTANT: Clear the mesh pointer so we reconnect to the new API
+    // When Play starts, SofaContext recreates its API, invalidating our old pointer
+    if (m_sofaMesh != nullptr)
+    {
+        UE_LOG(SUnreal_log, Warning, TEXT("[SOFA] Clearing stale mesh pointer for '%s' - will reconnect to new API"), *MeshName);
+        m_sofaMesh = nullptr;
+    }
 }
 
 // This is called when actor is spawned (at runtime or when you drop it into the world in editor)
@@ -63,12 +73,59 @@ void ASofaVisualMesh::PostLoad()
     Super::PostLoad();
 }
 
-// Called every frame
 void ASofaVisualMesh::Tick( float DeltaTime )
 {
     Super::Tick( DeltaTime );
 
-    if (!m_isStatic)
+    // Try to connect to SOFA mesh if not connected yet
+    if (m_sofaMesh == nullptr)
+    {
+        // Auto-detect SofaContext if not set
+        if (!SofaContextRef)
+        {
+            // First try immediate parent
+            AActor* Parent = GetAttachParentActor();
+            if (Parent)
+            {
+                SofaContextRef = Cast<ASofaContext>(Parent);
+            }
+            
+            // If not found, search for any SofaContext in the level
+            if (!SofaContextRef)
+            {
+                TArray<AActor*> FoundActors;
+                UGameplayStatics::GetAllActorsOfClass(GetWorld(), ASofaContext::StaticClass(), FoundActors);
+                if (FoundActors.Num() > 0)
+                {
+                    SofaContextRef = Cast<ASofaContext>(FoundActors[0]);
+                    UE_LOG(SUnreal_log, Warning, TEXT("[SOFA] SofaVisualMesh: Auto-detected SofaContext '%s' in level"), *SofaContextRef->GetName());
+                }
+            }
+        }
+
+        if (SofaContextRef)
+        {
+            if (SofaContextRef->isSceneLoaded())
+            {
+                // Use actor name as mesh name if MeshName is empty
+                FString searchName = MeshName.IsEmpty() ? GetActorLabel() : MeshName;
+                UE_LOG(SUnreal_log, Warning, TEXT("[SOFA] SofaVisualMesh::Tick - Looking for mesh '%s'"), *searchName);
+                
+                SofaPhysicsOutputMesh* sofaMesh = SofaContextRef->getOutputMeshByName(searchName);
+                if (sofaMesh)
+                {
+                    UE_LOG(SUnreal_log, Warning, TEXT("[SOFA] SofaVisualMesh: Found mesh '%s', creating visual"), *searchName);
+                    setSofaMesh(sofaMesh);
+                }
+                else
+                {
+                    UE_LOG(SUnreal_log, Warning, TEXT("[SOFA] SofaVisualMesh: Mesh '%s' not found in SOFA scene"), *searchName);
+                }
+            }
+        }
+    }
+
+    if (!m_isStatic && m_sofaMesh != nullptr)
         updateMesh();
 }
 
@@ -78,18 +135,19 @@ void ASofaVisualMesh::updateMesh()
     if (m_sofaMesh == nullptr)
         return;
 
-    // Get number of vertices
     int nbrV = m_sofaMesh->getNbVertices();
+    if (nbrV <= 0)
+        return;
 
-    // Get the different buffers
     float* sofaVertices = new float[nbrV * 3];
     float* sofaNormals = new float[nbrV * 3];
     m_sofaMesh->getVPositions(sofaVertices);
     m_sofaMesh->getVNormals(sofaNormals);
 
-    // Copy data into UE structure
     TArray<FVector> vertices;
     TArray<FVector> normals;
+    vertices.Reserve(nbrV);
+    normals.Reserve(nbrV);
 
     if (m_inverseNormal)
     {
@@ -107,62 +165,69 @@ void ASofaVisualMesh::updateMesh()
             normals.Add(FVector(sofaNormals[i * 3], sofaNormals[i * 3 + 1], sofaNormals[i * 3 + 2]));
         }
     }
+
+    delete[] sofaVertices;
+    delete[] sofaNormals;
+
     mesh->UpdateMeshSection(0, vertices, normals, TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>());
 }
 
 
 void ASofaVisualMesh::createMesh()
 {
-    UE_LOG(SUnreal_log, Warning, TEXT("### createMesh"));
-
     if (m_sofaMesh == nullptr)
         return;
 
-    // Get topology elements numbers
     int nbrV = m_sofaMesh->getNbVertices();
     int nbrTri = m_sofaMesh->getNbTriangles();
-    int nbrQuads = m_sofaMesh->getNbQuads();
-    UE_LOG(SUnreal_log, Warning, TEXT("## ASofaVisualMesh::createMesh(): nbrV: %d | nbrTri: %d | nbrQuads: %d"), nbrV, nbrTri, nbrQuads);
+    int nbrQuad = m_sofaMesh->getNbQuads();
+    UE_LOG(SUnreal_log, Warning, TEXT("##### ASofaVisualMesh::createMesh:  nbrV: %d | nbrTri: %d | nbrQuad: %d ####"), nbrV, nbrTri, nbrQuad);
 
-    if (nbrV <= 0 || nbrV > 100000)
+    if (nbrV <= 0)
     {
-        UE_LOG(SUnreal_log, Error, TEXT("## ASofaVisualMesh::createMesh(): Error on the nbrV returned: %d"), nbrV);
+        UE_LOG(SUnreal_log, Error, TEXT("[SOFA] ASofaVisualMesh::createMesh - No vertices!"));
         return;
     }
 
-    float* sofaVertices = new float[nbrV*3];
-    float* sofaNormals = new float[nbrV*3];
+    // Get all info from SofaPhysicsOutputMesh
+    float* sofaVertices = new float[nbrV * 3];
+    float* sofaNormals = new float[nbrV * 3];
     float* sofaTexCoords = new float[nbrV * 2];
-    int* sofaTriangles = new int[nbrTri*3];
-    int* sofaQuads = new int[nbrQuads * 3];
+    int* sofaTriangles = new int[nbrTri * 3];
+    int* sofaQuads = new int[nbrQuad * 4];
 
-    // Get the different buffers
     m_sofaMesh->getVPositions(sofaVertices);
     m_sofaMesh->getVNormals(sofaNormals);
+    m_sofaMesh->getVTexCoords(sofaTexCoords);
     m_sofaMesh->getTriangles(sofaTriangles);
     m_sofaMesh->getQuads(sofaQuads);
-    m_sofaMesh->getVTexCoords(sofaTexCoords);
 
-    // Convert in Unreal structure
+    // Create Arrays to fill UE buffers
     TArray<FVector> vertices;
-    TArray<int32> Triangles;
     TArray<FVector> normals;
     TArray<FVector2D> UV0;
-    TArray<FProcMeshTangent> tangents;
+    TArray<int32> Triangles;
     TArray<FLinearColor> vertexColors;
+    TArray<FProcMeshTangent> tangents;
 
-    for (int i = 0; i < nbrV; i++)
+    // Fill Unreal Mesh info with SOFA buffers
+    if (m_inverseNormal)
     {
-        vertices.Add(FVector(sofaVertices[i * 3], sofaVertices[i * 3 + 1], sofaVertices[i * 3 + 2]));
-        UV0.Add(FVector2D(sofaTexCoords[i * 2], sofaTexCoords[i * 2 + 1]));
-
-        if (m_inverseNormal)
+        for (int i = 0; i < nbrV; i++)
+        {
+            vertices.Add(FVector(sofaVertices[i * 3], sofaVertices[i * 3 + 1], sofaVertices[i * 3 + 2]));
             normals.Add(FVector(-sofaNormals[i * 3], -sofaNormals[i * 3 + 1], -sofaNormals[i * 3 + 2]));
-        else
+            UV0.Add(FVector2D(sofaTexCoords[i * 2], sofaTexCoords[i * 2 + 1]));
+        }
+    }
+    else
+    {
+        for (int i = 0; i < nbrV; i++)
+        {
+            vertices.Add(FVector(sofaVertices[i * 3], sofaVertices[i * 3 + 1], sofaVertices[i * 3 + 2]));
             normals.Add(FVector(sofaNormals[i * 3], sofaNormals[i * 3 + 1], sofaNormals[i * 3 + 2]));
-
-        tangents.Add(FProcMeshTangent(0, 1, 0));
-        vertexColors.Add(FLinearColor(0.75, 0.75, 0.75, 1.0));
+            UV0.Add(FVector2D(sofaTexCoords[i * 2], sofaTexCoords[i * 2 + 1]));
+        }
     }
 
     // Add triangles
@@ -173,8 +238,8 @@ void ASofaVisualMesh::createMesh()
         Triangles.Add(sofaTriangles[i * 3 + 2]);
     }
 
-    // Add quads
-    for (int i = 0; i < nbrQuads; i++)
+    // Add quads as 2 triangles
+    for (int i = 0; i < nbrQuad; i++)
     {
         Triangles.Add(sofaQuads[i * 4]);
         Triangles.Add(sofaQuads[i * 4 + 1]);
@@ -184,75 +249,68 @@ void ASofaVisualMesh::createMesh()
         Triangles.Add(sofaQuads[i * 4 + 2]);
         Triangles.Add(sofaQuads[i * 4 + 3]);
     }
-    
+
+    // Recompute UV if not provided
+    bool needUVRecompute = true;
+    for (int i = 0; i < nbrV * 2; i++)
+    {
+        if (sofaTexCoords[i] != 0.0f)
+        {
+            needUVRecompute = false;
+            break;
+        }
+    }
+
+    if (needUVRecompute)
+    {
+        computeBoundingBox(vertices);
+        recomputeUV(vertices, UV0);
+    }
+
+    // Clean up SOFA buffers
     delete[] sofaVertices;
     delete[] sofaNormals;
     delete[] sofaTexCoords;
     delete[] sofaTriangles;
     delete[] sofaQuads;
-    
+
+    // Create the mesh section
     mesh->CreateMeshSection_LinearColor(0, vertices, Triangles, normals, UV0, vertexColors, tangents, true);
 
-    // Enable collision data
-    //mesh->ContainsPhysicsTriMeshData(true);
+    UE_LOG(SUnreal_log, Warning, TEXT("[SOFA] ASofaVisualMesh::createMesh - Created mesh with %d vertices, %d triangles"), vertices.Num(), Triangles.Num() / 3);
 }
+
 
 void ASofaVisualMesh::computeBoundingBox(const TArray<FVector>& vertices)
 {
-    int nbrV = vertices.Num();
-
-    // Get min and max of the mesh
-    for (int i = 0; i < nbrV; i++)
+    for (const FVector& v : vertices)
     {
-        const FVector& vertex = vertices[i];        
-        if (vertex.X > m_max.X)
-            m_max.X = vertex.X;
-        if (vertex.Y > m_max.Y)
-            m_max.Y = vertex.Y;
-        if (vertex.Z > m_max.Z)
-            m_max.Z = vertex.Z;
+        m_min.X = FMath::Min(m_min.X, v.X);
+        m_min.Y = FMath::Min(m_min.Y, v.Y);
+        m_min.Z = FMath::Min(m_min.Z, v.Z);
 
-        if (vertex.X < m_min.X)
-            m_min.X = vertex.X;
-        if (vertex.Y < m_min.Y)
-            m_min.Y = vertex.Y;
-        if (vertex.Z < m_min.Z)
-            m_min.Z = vertex.Z;
+        m_max.X = FMath::Max(m_max.X, v.X);
+        m_max.Y = FMath::Max(m_max.Y, v.Y);
+        m_max.Z = FMath::Max(m_max.Z, v.Z);
     }
 }
 
+
 void ASofaVisualMesh::recomputeUV(const TArray<FVector>& vertices, TArray<FVector2D>& UV0)
-{  
-    int nbrV = vertices.Num();
-
-    computeBoundingBox(vertices);
-    FVector center = (m_max + m_min)*0.5f;
-
-    // Map mesh vertices to sphere
-    // transform cart to spherical coordinates (r, theta, phi) and sphere to cart back with radius = 1
-    TArray<FVector> sphereV;
-    sphereV.SetNum(nbrV);
-    UV0.SetNum(nbrV);
+{
+    FVector range = m_max - m_min;
     
-    for (int i = 0; i < nbrV; ++i)
+    // Avoid division by zero
+    if (range.X == 0) range.X = 1;
+    if (range.Y == 0) range.Y = 1;
+    if (range.Z == 0) range.Z = 1;
+
+    UV0.Empty();
+    for (const FVector& v : vertices)
     {
-        FVector Vcentered = vertices[i] - center;
-        float r = sqrtf(Vcentered.X*Vcentered.X + Vcentered.Y*Vcentered.Y + Vcentered.Z*Vcentered.Z);
-        float theta = acos(Vcentered.Z / r);
-        float phi = atan(Vcentered.Y / Vcentered.X);
-
-        sphereV[i].X = sin(phi)*cos(theta);
-        sphereV[i].Y = sin(phi)*sin(theta);
-        sphereV[i].Z = cos(phi);
+        // Simple planar UV mapping based on XY coordinates
+        float u = (v.X - m_min.X) / range.X;
+        float vCoord = (v.Y - m_min.Y) / range.Y;
+        UV0.Add(FVector2D(u, vCoord));
     }
-
-    // transform sphere coordinates to UV map
-    for (int i = 0; i < nbrV; ++i)
-    {
-        FVector pos = (sphereV[i] - center);
-        pos.Normalize();
-        UV0[i].X = 0.5 + atan2(pos.Z, pos.X) / (2 * PI);
-        UV0[i].Y = 0.5 - asin(pos.Y) / PI;
-    }
-
 }

@@ -27,6 +27,7 @@
 #include "SofaContext.generated.h"
 
 class SofaPhysicsAPI;
+class SofaPhysicsOutputMesh;
 
 UCLASS()
 class SOFAUE5_API ASofaContext : public AActor
@@ -60,6 +61,12 @@ public:
 
     void setGravity(FVector value);
 
+    SofaPhysicsAPI* getSofaAPI() { return m_sofaAPI; }
+
+    class SofaPhysicsOutputMesh* getOutputMeshByName(const FString& name);
+
+    bool isSceneLoaded() const { return m_status > 0; }
+
 public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sofa Parameters")
         FFilePath filePath;
@@ -83,6 +90,11 @@ protected:
 
     void loadDefaultPlugin();
 
+    /** Auto-spawn SofaVisualMesh actors for all SOFA output meshes */
+    void SpawnVisualMeshActors();
+
+    /** Check if there are existing SofaVisualMesh actors referencing this context */
+    bool HasExistingVisualMeshes();
 
 private:
     int32 m_dllLoadStatus;

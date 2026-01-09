@@ -28,9 +28,8 @@
 #include "ProceduralMeshComponent.h"
 #include "SofaVisualMesh.generated.h"
 
-//DECLARE_LOG_CATEGORY_EXTERN(YourLog, Log, All);
-
 class SofaPhysicsOutputMesh;
+class ASofaContext;
 
 UCLASS()
 class SOFAUE5_API ASofaVisualMesh : public AActor
@@ -38,25 +37,26 @@ class SOFAUE5_API ASofaVisualMesh : public AActor
     GENERATED_BODY()
 
 public:
-    // Sets default values for this actor's properties
     ASofaVisualMesh();
 
     void setSofaMesh(SofaPhysicsOutputMesh* sofaMesh);
 
-    // Called when the game starts or when spawned
     virtual void BeginPlay() override;
-
-    //virtual void EndPlay() override;
     void PostActorCreated() override;
     void PostLoad() override;
     
-    // Called every frame
     virtual void Tick( float DeltaSeconds ) override;
 
     void recomputeUV(const TArray<FVector>& vertices, TArray<FVector2D>& UV0);
     void computeBoundingBox(const TArray<FVector>& vertices);
 
     bool m_isStatic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sofa Parameters")
+        ASofaContext* SofaContextRef;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sofa Parameters")
+        FString MeshName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sofa Parameters")
         bool m_inverseNormal;
