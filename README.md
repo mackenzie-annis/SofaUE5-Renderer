@@ -94,6 +94,8 @@ SofaUE5-Renderer/
 │   └── ThirdParty/SofaUE5Library/Win64/   # SOFA DLLs go here
 ├── Content/
 │   └── SofaScenes/                         # Example .scn files
+├── SOFAFix/
+│   └── SofaPhysicsSimulation.cpp          # Patched SOFA source file
 ├── Source/SofaUE5/
 │   ├── Private/
 │   │   ├── SofaContext.cpp                 # Main SOFA integration
@@ -130,9 +132,41 @@ SofaUE5-Renderer/
 
 ## Building SOFA from Source
 
-If pre-built binaries cause crashes, build SOFA yourself:
+The pre-built SOFA binaries have a bug that causes crashes when loading scenes in Unreal. You'll need to build SOFA yourself with a small fix applied.
 
-Copy DLLs from `C:/sofa/build/bin/Release/` to the plugin folder.
+### The Fix
+
+There's a missing initialization call in the SofaPhysicsAPI that causes null pointer crashes. We've included the patched file in the `SOFAFix/` folder.
+
+**Quick version:** Copy `SOFAFix/SofaPhysicsSimulation.cpp` to your SOFA source:
+```
+sofa/src/applications/projects/SofaPhysicsAPI/src/SofaPhysicsAPI/
+```
+
+### Build Steps
+
+1. Clone SOFA 23.12:
+   ```
+   git clone https://github.com/sofa-framework/sofa.git C:/sofa/src
+   cd C:/sofa/src
+   git checkout v23.12
+   ```
+
+2. Apply the fix (copy patched file over the original):
+   ```
+   copy "YourProject/Plugins/SofaUE5-Renderer/SOFAFix/SofaPhysicsSimulation.cpp" "C:/sofa/src/applications/projects/SofaPhysicsAPI/src/SofaPhysicsAPI/"
+   ```
+
+3. Configure with CMake:
+   ```
+   mkdir C:/sofa/build
+   cd C:/sofa/build
+   cmake ../src -G "Visual Studio 17 2022" -A x64 -DAPPLICATION_SOFAPHYSICSAPI=ON
+   ```
+
+4. Open `C:/sofa/build/SOFA.sln` in Visual Studio, set to **Release**, and build.
+
+5. Copy all DLLs from `C:/sofa/build/bin/Release/` to the plugin's `Binaries/ThirdParty/SofaUE5Library/Win64/` folder.
 
 ## Changes from Original (InfinyTech3D)
 This fork includes updates for **UE 5.5** compatibility:
